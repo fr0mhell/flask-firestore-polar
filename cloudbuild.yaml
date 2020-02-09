@@ -1,0 +1,13 @@
+steps:
+  # build the container image
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/python-polar-codes/app', '.']
+  # push the container image to Container Registry
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/python-polar-codes/app']
+  # Deploy container image to Cloud Run
+- name: 'gcr.io/cloud-builders/gcloud'
+  args: ['beta', 'run', 'deploy', 'app', '--image', 'gcr.io/python-polar-codes/app', '--region', 'us-central1']
+images:
+- gcr.io/python-polar-codes/app
+timeout: 1200s
