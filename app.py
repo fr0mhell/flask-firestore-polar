@@ -1,20 +1,24 @@
 # Required Imports
 import os
-from flask import Flask, request, jsonify
-from firebase_admin import credentials, firestore, initialize_app
-from operator import itemgetter
 from math import ceil
-import settings
+from uuid import uuid4
+
+from firebase_admin import credentials, firestore, initialize_app
+from flask import Flask, jsonify, request
+
+import config
 
 # Initialize Flask App
 app = Flask(__name__)
+default_app = initialize_app()
 
-# Initialize Firestore DB
-cred = credentials.Certificate(settings.KEY)
-default_app = initialize_app(cred)
+if config.ENVIRONMENT != 'production':
+    from key import KEY
+    # Initialize Firestore DB with local credentials
+    cred = credentials.Certificate(KEY)
+
 db = firestore.client()
-
-PREPARED_DATA_REF = db.document('prepare/data')
+PREPARED_COL_REF = db.collection(config.PREPARED_COL_ID)
 
 
 @app.route('/prepare', methods=['POST'])
@@ -22,22 +26,26 @@ def prepare():
     """Prepare parameters for further experiments."""
     try:
         params = {
-            'code_types': request.json.get('code_types', settings.CodeTypes.ALL),
-            'code_lengths': request.json.get('code_lengths', []),
+            'code_types': request.json.get('code_types', config.CodeTypes.ALL),
+            'code_lengths': request.json['code_lengths'],
             'snr_range': request.json['snr_range'],
             'required_messages': request.json['required_messages'],
-            'nodes': request.json['nodes'],
         }
         prepared_data = prepare_experiment_data(**params)
 
-        PREPARED_DATA_REF.set({'experiments': prepared_data})
+        for i in range(0, len(prepared_data), 500):
+            batch = db.batch()
+            for data in prepared_data[i: i+500]:
+                batch.set(PREPARED_COL_REF.document(str(uuid4())), data)
+            batch.commit()
 
-        return jsonify({"success": True}), 201
+        return jsonify({'experiments': len(prepared_data)}), 201
     except Exception as e:
-        return f"An Error Occured: {e}"
+        return f'An Error Occurred: {e}\nRequest: {request.json}', 400
 
 
-def prepare_experiment_data(snr_range, required_messages, nodes,
+def prepare_experiment_data(snr_range, required_messages,
+                            messages_per_experiment=5000,
                             code_types=None,
                             code_lengths=None,
                             channel_type='simple-bpsk'):
@@ -48,72 +56,70 @@ def prepare_experiment_data(snr_range, required_messages, nodes,
     results = list()
 
     for code_type in code_types:
-        codes_ref = db.collection(code_type)
 
-        if code_lengths:
-            codes_ref.where('N', 'in', code_lengths)
+        for N in code_lengths:
+            codes = list(db.collection(code_type).where('N', '==', N).stream())
 
-        codes = codes_ref.list_documents()
+            for code in codes:
+                experiments_ref = db.collection(
+                    f'{code_type}/{code.id}/channels/{channel_type}/experiments')
 
-        for code in codes:
-            experiments_ref = db.collection(f'{code_type}/{code.id}/channels/{channel_type}/experiments')
+                for snr in snr_range:
+                    experiments = list(experiments_ref.where('snr_db', '==', snr).stream())
+                    messages = required_messages - sum(
+                        [e.to_dict()['frames'] for e in experiments])
+                    if messages <= 0:
+                        continue
 
-            for snr in snr_range:
-                experiments = experiments_ref.where('snr_db', '==', snr).list_documents()
-                messages = required_messages - sum([e.to_dict()['frames'] for e in experiments])
-                if messages == 0:
-                    continue
+                    result = code.to_dict().copy()
+                    result.pop('M', None)
+                    result['code_id'] = code.id
+                    result['code_type'] = code_type
+                    result['channel_type'] = channel_type
+                    result['messages'] = messages_per_experiment
+                    result['snr'] = snr
 
-                result = code.to_dict().copy()
-                result.pop('type')
-                result['code_id'] = code.id
-                result['code_type'] = code_type
-                result['channel_type'] = channel_type
-                result['messages'] = messages
-                result['snr'] = snr
-                results.append(result)
+                    repetitions = ceil(messages / messages_per_experiment)
+                    code_results = [result] * repetitions
+                    results += code_results
 
-    results = sorted(results, key=itemgetter('messages'))
-    step = ceil(len(results) / nodes)
-    return [results[i * step: (i + 1) * step] for i in range(len(results))]
+    return results
 
 
-@app.route('/get-params', methods=['GET'])
+@app.route('/get-params', methods=['PUT'])
 def get_params():
     """Get parameters for an experiment.
     Also, the parameter removed from list to be considered as already used.
     """
     try:
-        experiments = PREPARED_DATA_REF.get().to_dict()
-
-        if len(experiments['experiments']) == 0:
-            return jsonify([]), 200
-
-        response = experiments['experiments'].pop(0)
-        PREPARED_DATA_REF.set(experiments)
-
+        experiment = list(PREPARED_COL_REF.order_by('N').limit(1).stream())[0]
+        response = experiment.to_dict()
+        db.document(experiment.reference.path).delete()
         return jsonify(response), 200
     except Exception as e:
-        return f"An Error Occured: {e}"
+        return f'An Error Occurred: {e}\nRequest: {request.json}', 400
 
 
 @app.route('/save-result', methods=['POST'])
 def save_result():
     """Save experiment result for particular code."""
     try:
-        result = request.json()
+        result = request.json
+        print(result)
 
         route_params = result.pop('route_params')
         code_type = route_params.get('code_type')
         code_id = route_params.get('code_id')
         channel_type = route_params.get('channel_type')
 
-        experiments_ref = db.collection(f'{code_type}/{code_id}/channels/{channel_type}/experiments')
-        experiments_ref.set(result)
+        experiments_ref = db.collection(
+            f'{code_type}/{code_id}/channels/{channel_type}/experiments'
+        )
+        experiments_ref.add(result)
 
         return jsonify({"success": True}), 201
     except Exception as e:
-        return f"An Error Occured: {e}"
+        return f'An Error Occurred: {e}\nRequest: {request.json}', 400
 
 
 port = int(os.environ.get('PORT', 8080))
