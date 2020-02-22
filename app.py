@@ -1,4 +1,3 @@
-# Required Imports
 import os
 from math import ceil
 from uuid import uuid4
@@ -45,7 +44,7 @@ def prepare():
 
 
 def prepare_experiment_data(snr_range, required_messages,
-                            messages_per_experiment=5000,
+                            per_experiment=1000,
                             code_types=None,
                             code_lengths=None,
                             channel_type='simple-bpsk'):
@@ -76,10 +75,10 @@ def prepare_experiment_data(snr_range, required_messages,
                     result['code_id'] = code.id
                     result['code_type'] = code_type
                     result['channel_type'] = channel_type
-                    result['messages'] = messages_per_experiment
+                    result['messages'] = per_experiment
                     result['snr'] = snr
 
-                    repetitions = ceil(messages / messages_per_experiment)
+                    repetitions = ceil(messages / per_experiment)
                     code_results = [result] * repetitions
                     results += code_results
 
@@ -92,7 +91,12 @@ def get_params():
     Also, the parameter removed from list to be considered as already used.
     """
     try:
-        experiment = list(PREPARED_COL_REF.order_by('N').limit(1).stream())[0]
+        experiments = list(PREPARED_COL_REF.order_by('N').limit(1).stream())
+
+        if not experiments:
+            return f'No params for experiments', 204
+
+        experiment = experiments[0]
         response = experiment.to_dict()
         db.document(experiment.reference.path).delete()
         return jsonify(response), 200
