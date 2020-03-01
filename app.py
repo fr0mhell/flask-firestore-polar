@@ -24,12 +24,8 @@ PREPARED_COL_REF = db.collection(config.PREPARED_COL_ID)
 def prepare():
     """Prepare parameters for further experiments."""
     try:
-        params = {
-            'code_types': request.json.get('code_types', config.CodeTypes.ALL),
-            'code_lengths': request.json['code_lengths'],
-            'snr_range': request.json['snr_range'],
-            'required_messages': request.json['required_messages'],
-        }
+        params = request.json
+        params['code_types'] = request.json.get('code_types', config.CodeTypes.ALL)
         prepared_data = prepare_experiment_data(**params)
 
         for i in range(0, len(prepared_data), 500):
@@ -47,7 +43,8 @@ def prepare_experiment_data(snr_range, required_messages,
                             per_experiment=1000,
                             code_types=None,
                             code_lengths=None,
-                            channel_type='simple-bpsk'):
+                            channel_type='simple-bpsk',
+                            **kwargs):
     """Prepare parameters for further experiments based on performed ones.
     There are some already performed experiments, so we need to consider them
     when going to reach some number of experiments.
@@ -70,7 +67,7 @@ def prepare_experiment_data(snr_range, required_messages,
                     if messages <= 0:
                         continue
 
-                    result = code.to_dict().copy()
+                    result = code.to_dict()
                     result.pop('M', None)
                     result['code_id'] = code.id
                     result['code_type'] = code_type
