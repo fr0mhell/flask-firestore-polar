@@ -2,7 +2,7 @@
 ENVIRONMENT = 'production'
 
 # Collection with prepared data for experiments
-PREPARED_COL_ID = 'prepared'
+PREPARED_COL_ID = 'to_simulate'
 
 
 class CodeTypes:
