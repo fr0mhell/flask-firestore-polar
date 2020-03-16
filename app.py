@@ -123,6 +123,67 @@ def save_result():
         return f'An Error Occurred: {e}\nRequest: {request.json}', 400
 
 
+@app.route('/GA/result', methods=['POST'])
+def ga_result():
+    """Save GA results."""
+    try:
+        code = request.json['code']
+        code_params = request.json['code_params']
+        result = request.json['result']
+
+        db.collection('ga').document(code).set(code_params)
+        result_col = db.collection(f'ga/{code}/result')
+
+        for i in range(0, len(result), 500):
+            batch = db.batch()
+            for data in result[i: i+500]:
+                batch.set(result_col.document(str(uuid4())), data)
+            batch.commit()
+
+        return jsonify({'results': len(result)}), 201
+
+    except Exception as e:
+        return f'An Error Occurred: {e}\nRequest: {request.json}', 400
+
+
+@app.route('/GA/dump', methods=['GET', 'POST'])
+def ga_dump():
+    """Save or load GA dump."""
+    try:
+        if request.method == 'GET':
+            code = request.json['code']
+
+            code_params = db.collection('ga').document(code).get().to_dict()
+            dump = [d.to_dict() for d in db.collection(f'ga/{code}/dump').stream()]
+
+            return (
+                jsonify({
+                    'code_params': code_params,
+                    'dump': dump,
+                }),
+                200,
+            )
+
+        if request.method == 'POST':
+            code = request.json['code']
+            code_params = request.json['code_params']
+            dump = request.json['dump']
+
+            db.collection('ga').document(code).set(code_params)
+            dump_col = db.collection(f'ga/{code}/dump')
+
+            for i in range(0, len(dump), 500):
+                batch = db.batch()
+                for data in dump[i: i+500]:
+                    batch.set(dump_col.document(str(uuid4())), data)
+                batch.commit()
+
+            return jsonify({'results': len(dump)}), 201
+
+    except Exception as e:
+        return f'An Error Occurred: {e}\nRequest: {request.json}', 400
+
+
 port = int(os.environ.get('PORT', 8080))
 if __name__ == '__main__':
     app.run(threaded=True, host='0.0.0.0', port=port)
