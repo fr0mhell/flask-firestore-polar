@@ -152,17 +152,9 @@ def ga_dump():
     try:
         if request.method == 'GET':
             code = request.json['code']
-
-            code_params = db.collection('ga').document(code).get().to_dict()
             dump = [d.to_dict() for d in db.collection(f'ga/{code}/dump').stream()]
 
-            return (
-                jsonify({
-                    'code_params': code_params,
-                    'dump': dump,
-                }),
-                200,
-            )
+            return (jsonify({'dump': dump}), 200)
 
         if request.method == 'POST':
             code = request.json['code']
