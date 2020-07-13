@@ -129,33 +129,37 @@ def save_result():
 @app.route('/clear', methods=['POST'])
 def clear_collections():
     """Delete the data from collections."""
-    to_clear = request.json['collections']
-    results = dict()
+    try:
+        to_clear = request.json['collections']
+        results = dict()
 
-    for coll in to_clear:
-        deleted = 0
+        for coll in to_clear:
+            deleted = 0
 
-        docs = db.collection(coll).stream()
-        batch = db.batch()
-        batch_count = 0
+            docs = db.collection(coll).stream()
+            batch = db.batch()
+            batch_count = 0
 
-        for doc in docs:
-            batch.delete(doc.id)
-            batch_count += 1
+            for doc in docs:
+                batch.delete(doc.id)
+                batch_count += 1
 
-            if batch_count >= config.BATCH_SIZE:
+                if batch_count >= config.BATCH_SIZE:
+                    deleted += batch_count
+                    batch.commit()
+                    batch = db.batch()
+                    batch_count = 0
+
+            if batch_count:
                 deleted += batch_count
                 batch.commit()
-                batch = db.batch()
-                batch_count = 0
 
-        if batch_count:
-            deleted += batch_count
-            batch.commit()
+            results[coll] = deleted
 
-        results[coll] = deleted
+        return jsonify(results), 201
 
-    return jsonify(results), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 
 @app.route('/save-result', methods=['POST'])
