@@ -5,7 +5,7 @@ from uuid import uuid4
 from firebase_admin import credentials, firestore, initialize_app
 from flask import Flask, jsonify, request
 
-from . import config
+import config
 
 # Initialize Flask App
 app = Flask(__name__)
