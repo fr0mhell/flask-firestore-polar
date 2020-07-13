@@ -141,7 +141,7 @@ def clear_collections():
             batch_count = 0
 
             for doc in docs:
-                batch.delete(doc.id)
+                batch.delete(doc.reference)
                 batch_count += 1
 
                 if batch_count >= config.BATCH_SIZE:
