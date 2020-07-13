@@ -5,7 +5,7 @@ from uuid import uuid4
 from firebase_admin import credentials, firestore, initialize_app
 from flask import Flask, jsonify, request
 
-import config
+from . import config
 
 # Initialize Flask App
 app = Flask(__name__)
@@ -25,12 +25,11 @@ def prepare():
     """Prepare parameters for further experiments."""
     try:
         params = request.json
-        params['code_types'] = request.json.get('code_types', config.CodeTypes.ALL)
         prepared_data = prepare_experiment_data(**params)
 
-        for i in range(0, len(prepared_data), 500):
+        for i in range(0, len(prepared_data), config.BATCH_SIZE):
             batch = db.batch()
-            for data in prepared_data[i: i+500]:
+            for data in prepared_data[i: i+config.BATCH_SIZE]:
                 batch.set(PREPARED_COL_REF.document(str(uuid4())), data)
             batch.commit()
 
@@ -39,45 +38,49 @@ def prepare():
         return f'An Error Occurred: {e}\nRequest: {request.json}', 400
 
 
-def prepare_experiment_data(snr_range, required_messages,
-                            per_experiment=1000,
-                            code_types=None,
-                            code_lengths=None,
-                            channel_type='simple-bpsk',
-                            **kwargs):
+def prepare_experiment_data(
+        snr_range: list,
+        required_messages: int,
+        codes: dict,
+        per_experiment=1000,
+        channel_type='simple-bpsk', **kwargs,
+):
     """Prepare parameters for further experiments based on performed ones.
     There are some already performed experiments, so we need to consider them
     when going to reach some number of experiments.
     """
     results = list()
 
-    for code_type in code_types:
+    for code_type, code_ids in codes.items():
 
-        for N in code_lengths:
-            codes = list(db.collection(code_type).where('N', '==', N).stream())
+        for code_id in code_ids:
+            code = db.collection(code_type).document(code_id).get()
+            experiments_ref = db.collection(
+                f'{code_type}/{code_id}/channels/{channel_type}/experiments'
+            )
 
-            for code in codes:
-                experiments_ref = db.collection(
-                    f'{code_type}/{code.id}/channels/{channel_type}/experiments')
+            for snr in snr_range:
+                experiments = list(
+                    experiments_ref.where('snr_db', '==', snr).stream()
+                )
+                messages = (
+                    required_messages -
+                    sum([e.to_dict()['frames'] for e in experiments])
+                )
+                if messages <= 0:
+                    continue
 
-                for snr in snr_range:
-                    experiments = list(experiments_ref.where('snr_db', '==', snr).stream())
-                    messages = required_messages - sum(
-                        [e.to_dict()['frames'] for e in experiments])
-                    if messages <= 0:
-                        continue
+                result = code.to_dict()
+                result.pop('M', None)
+                result['code_id'] = code.id
+                result['code_type'] = code_type
+                result['channel_type'] = channel_type
+                result['messages'] = per_experiment
+                result['snr'] = snr
 
-                    result = code.to_dict()
-                    result.pop('M', None)
-                    result['code_id'] = code.id
-                    result['code_type'] = code_type
-                    result['channel_type'] = channel_type
-                    result['messages'] = per_experiment
-                    result['snr'] = snr
-
-                    repetitions = ceil(messages / per_experiment)
-                    code_results = [result] * repetitions
-                    results += code_results
+                repetitions = ceil(messages / per_experiment)
+                code_results = [result] * repetitions
+                results += code_results
 
     return results
 
@@ -123,27 +126,41 @@ def save_result():
         return f'An Error Occurred: {e}\nRequest: {request.json}', 400
 
 
-@app.route('/ga-result', methods=['POST'])
-def ga_result():
-    """Save GA results."""
-    try:
-        ga_id = request.json['ga_id']
-        ga_params = request.json['ga_params']
-        result = request.json['result']
+@app.route('/clear', methods=['POST'])
+def clear_collections():
+    """Delete the data from collections."""
+    to_clear = request.json['collections']
+    results = dict()
 
-        db.collection('ga').document(ga_id).set(ga_params)
-        result_col = db.collection(f'ga/{ga_id}/result')
+    for coll in to_clear:
+        deleted = 0
 
-        for i in range(0, len(result), 500):
-            batch = db.batch()
-            for data in result[i: i+500]:
-                batch.set(result_col.document(str(uuid4())), data)
+        docs = db.collection(coll).stream()
+        batch = db.batch()
+        batch_count = 0
+
+        for doc in docs:
+            batch.delete(doc.id)
+            batch_count += 1
+
+            if batch_count >= config.BATCH_SIZE:
+                deleted += batch_count
+                batch.commit()
+                batch = db.batch()
+                batch_count = 0
+
+        if batch_count:
+            deleted += batch_count
             batch.commit()
 
-        return jsonify({'results': len(result)}), 201
+        results[coll] = deleted
 
-    except Exception as e:
-        return f'An Error Occurred: {e}\nRequest: {request.json}', 400
+    return jsonify(results), 201
+
+
+@app.route('/save-result', methods=['POST'])
+def aggregate_results():
+    """Aggregate experiment results."""
 
 
 port = int(os.environ.get('PORT', 8080))

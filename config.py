@@ -4,8 +4,4 @@ ENVIRONMENT = 'production'
 # Collection with prepared data for experiments
 PREPARED_COL_ID = 'to_simulate'
 
-
-class CodeTypes:
-    FAST_SSC = 'fast-ssc'
-    RC_SCAN = 'rc_scan'
-    ALL = [FAST_SSC, RC_SCAN]
+BATCH_SIZE = 500
