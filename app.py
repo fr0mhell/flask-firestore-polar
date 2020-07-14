@@ -136,23 +136,20 @@ def clear_collections():
         for coll in to_clear:
             deleted = 0
 
-            docs = db.collection(coll).stream()
-            batch = db.batch()
-            batch_count = 0
+            while True:
+                docs = list(db.collection(coll).limit(config.BATCH_SIZE).stream())
 
-            for doc in docs:
-                batch.delete(doc.reference)
-                batch_count += 1
+                if not docs:
+                    break
 
-                if batch_count >= config.BATCH_SIZE:
-                    deleted += batch_count
-                    batch.commit()
-                    batch = db.batch()
-                    batch_count = 0
+                batch = db.batch()
 
-            if batch_count:
-                deleted += batch_count
+                for doc in docs:
+                    batch.delete(doc.reference)
+
                 batch.commit()
+
+                deleted += len(docs)
 
             results[coll] = deleted
 
