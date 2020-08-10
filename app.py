@@ -72,6 +72,7 @@ def prepare_experiment_data(
 
                 result = code.to_dict()
                 result.pop('M', None)
+                result.pop('is_systematic', None)
                 result['code_id'] = code.id
                 result['code_type'] = code_type
                 result['channel_type'] = channel_type
